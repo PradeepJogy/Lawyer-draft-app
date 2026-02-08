@@ -2,92 +2,101 @@ import streamlit as st
 import json
 import os
 
-# --- 1. CONFIGURATION & PERSISTENCE ---
-DB_FILE = "court_vault_data.json"
+# --- 1. DATA PERSISTENCE ---
+DB_FILE = "legal_vault.json"
 
-def load_data():
+def load_db():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
             return json.load(f)
-    return {"user": None, "vault": []}
+    return {"users": {}}
 
-def save_data(data):
+def save_db(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# Initialize app state
-if "app_data" not in st.session_state:
-    st.session_state.app_data = load_data()
+# Initialize database in session state
+if "db" not in st.session_state:
+    st.session_state.db = load_db()
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
 
-# --- 2. AUTHENTICATION SYSTEM (The Switch) ---
-def login_page():
-    st.title("⚖️ Court System Registration")
-    st.info("Please register to access your private vault and court dashboard.")
+# --- 2. AUTHENTICATION LOGIC (Registration vs Login) ---
+def auth_gate():
+    st.title("⚖️ Legal Portal Access")
     
-    with st.form("reg_form"):
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-        court_url = st.text_input("Court Website URL (e.g., https://court.gov)")
-        submit = st.form_submit_button("Register & Login")
-        
-        if submit:
-            if u and p and court_url:
-                st.session_state.app_data["user"] = {
-                    "username": u, 
-                    "password": p, 
-                    "court_site": court_url
-                }
-                save_data(st.session_state.app_data)
-                st.success("Registration Successful!")
+    # If no users exist, force Registration
+    if not st.session_state.db["users"]:
+        st.subheader("New User Registration")
+        with st.form("reg_form"):
+            u = st.text_input("Create Username")
+            p = st.text_input("Create Password", type="password")
+            court = st.text_input("Court Website URL (e.g. https://highcourt.gov)")
+            if st.form_submit_button("Register"):
+                if u and p and court:
+                    st.session_state.db["users"][u] = {"password": p, "court": court, "cases": []}
+                    save_db(st.session_state.db)
+                    st.success("Registration complete! Please log in.")
+                    st.rerun()
+    
+    # If users exist, show Login
+    else:
+        st.subheader("User Login")
+        u_login = st.text_input("Username")
+        p_login = st.text_input("Password", type="password")
+        if st.button("Login"):
+            user_data = st.session_state.db["users"].get(u_login)
+            if user_data and user_data["password"] == p_login:
+                st.session_state.current_user = u_login
                 st.rerun()
             else:
-                st.error("Please fill all fields.")
+                st.error("Invalid credentials")
 
-# --- 3. DASHBOARD & VAULT ---
-def dashboard_page():
-    user = st.session_state.app_data["user"]
-    st.sidebar.title(f"Welcome, {user['username']}")
+# --- 3. CASE MANAGEMENT FORMS ---
+def case_management():
+    user_id = st.session_state.current_user
+    user_data = st.session_state.db["users"][user_id]
     
-    menu = st.sidebar.radio("Navigation", ["Private Vault", "Court Communication", "Settings"])
+    st.sidebar.title(f"Logged in: {user_id}")
+    st.sidebar.write(f"Connected to: {user_data['court']}")
+    if st.sidebar.button("Logout"):
+        st.session_state.current_user = None
+        st.rerun()
 
-    if menu == "Private Vault":
-        st.header("🗄️ Private Drafting Vault")
-        
-        # New Draft Section
-        with st.expander("➕ Create New Draft"):
-            title = st.text_input("Case/Draft Title")
-            content = st.text_area("Draft Content")
-            if st.button("Save to Vault"):
-                st.session_state.app_data["vault"].append({"title": title, "content": content})
-                save_data(st.session_state.app_data)
-                st.success("Draft Saved!")
-                st.rerun()
+    st.header("📋 Case Management Dashboard")
+    
+    tab1, tab2, tab3 = st.tabs(["New Case Form", "Private Vault", "Court Sync"])
 
-        # List Existing Drafts
-        st.subheader("Your Saved Drafts")
-        for i, item in enumerate(st.session_state.app_data["vault"]):
-            with st.chat_message("user"):
-                st.write(f"*{item['title']}*")
-                st.write(item['content'])
+    with tab1:
+        st.subheader("Draft New Case")
+        with st.form("case_form"):
+            c_title = st.text_input("Case Reference / Title")
+            c_type = st.selectbox("Type", ["Civil", "Criminal", "Family", "Appellate"])
+            c_desc = st.text_area("Draft Details / Pleading")
+            if st.form_submit_button("Save Draft to Vault"):
+                new_case = {"title": c_title, "type": c_type, "details": c_desc}
+                st.session_state.db["users"][user_id]["cases"].append(new_case)
+                save_db(st.session_state.db)
+                st.success("Draft securely stored.")
 
-    elif menu == "Court Communication":
-        st.header("🌐 Court Site Interface")
-        st.write(f"Targeting: *{user['court_site']}*")
-        
-        if st.button("Push Vault Data to Court Form"):
-            st.warning(f"Connecting to {user['court_site']}...")
-            # Here is where the backend communication with the court site happens
-            st.success("Handshake established. Form data is ready for the Court's dashboard.")
+    with tab2:
+        st.subheader("Your Private Drafts")
+        for case in user_data["cases"]:
+            with st.expander(f"Case: {case['title']}"):
+                st.write(f"*Type:* {case['type']}")
+                st.write(case['details'])
 
-    elif menu == "Settings":
-        if st.button("Wipe All Data & Logout"):
-            if os.path.exists(DB_FILE):
-                os.remove(DB_FILE)
-            st.session_state.app_data = {"user": None, "vault": []}
-            st.rerun()
+    with tab3:
+        st.subheader("Court Communication")
+        st.write(f"Ready to communicate with: *{user_data['court']}*")
+        if st.button("Transmit to Court Dashboard"):
+            st.info(f"Establishing handshake with {user_data['court']}...")
+            # Communication logic goes here
+            st.success("Data prepared for Court Dashboard submission.")
 
-# --- 4. MAIN APP LOGIC ---
-if st.session_state.app_data["user"] is None:
-    login_page()
+# --- 4. MAIN APP FLOW ---
+
+if st.session_state.current_user is None:
+    auth_gate()
 else:
-    dashboard_page()
+    case_management()
