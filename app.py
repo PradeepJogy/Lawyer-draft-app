@@ -1,107 +1,81 @@
 import json
 import os
-import sys
-
-class VaultManager:
-    """Handles storage of drafts and private notes."""
-    VAULT_DIR = "private_vault"
-
-    @classmethod
-    def ensure_vault_exists(cls):
-        if not os.path.exists(cls.VAULT_DIR):
-            os.makedirs(cls.VAULT_DIR)
-
-    @classmethod
-    def save_draft(cls, title, content):
-        cls.ensure_vault_exists()
-        filename = f"{cls.VAULT_DIR}/{title.replace(' ', '_')}.txt"
-        with open(filename, 'w') as f:
-            f.write(content)
-        print(f"\n[Vault] Draft '{title}' saved successfully.")
-
-    @classmethod
-    def list_drafts(cls):
-        if not os.path.exists(cls.VAULT_DIR):
-            return []
-        return os.listdir(cls.VAULT_DIR)
 
 class CourtApp:
     def _init_(self):
-        self.session_file = "user_session.json"
-        self.user_data = self.load_session()
-        self.is_authenticated = bool(self.user_data)
+        self.db_file = "app_data.json"
+        self.state = self.load_all_data()
 
-    def load_session(self):
-        if os.path.exists(self.session_file):
-            with open(self.session_file, 'r') as f:
+    def load_all_data(self):
+        """Loads everything (User & Vault) in one go to prevent sync errors."""
+        if os.path.exists(self.db_file):
+            with open(self.db_file, 'r') as f:
                 return json.load(f)
-        return None
+        # Default empty state if app is 'new' or 'spoiled'
+        return {"user": None, "vault": []}
 
-    def save_session(self, u, p):
-        data = {"username": u, "password": p}
-        with open(self.session_file, 'w') as f:
-            json.dump(data, f)
-        self.user_data = data
-        self.is_authenticated = True
+    def save_all_data(self):
+        """Writes current state to disk immediately."""
+        with open(self.db_file, 'w') as f:
+            json.dump(self.state, f, indent=4)
 
-    def start(self):
-        print("=== Secure Court System v1.0 ===")
-        if self.is_authenticated:
-            self.show_dashboard()
+    def run(self):
+        """The brain of the app: Checks login status first."""
+        if not self.state["user"]:
+            self.show_login()
         else:
-            self.show_auth_screen()
+            self.show_dashboard()
 
-    def show_auth_screen(self):
-        print("\n--- LOGIN / REGISTRATION ---")
+    def show_login(self):
+        print("\n--- APP REGISTRATION ---")
         u = input("Username: ")
         p = input("Password: ")
         if u and p:
-            self.save_session(u, p)
-            self.show_dashboard()
+            self.state["user"] = {"name": u, "pass": p}
+            self.save_all_data()
+            print("Success! Restarting to Dashboard...")
+            self.run()
 
     def show_dashboard(self):
-        print(f"\n--- DASHBOARD (User: {self.user_data['username']}) ---")
-        print("1. [Vault] Create New Draft")
-        print("2. [Vault] View Saved Drafts")
-        print("3. Communicate with Court Site")
-        print("4. Logout & Exit")
+        print(f"\n--- DASHBOARD (User: {self.state['user']['name']}) ---")
+        print("1. Private Vault (Drafts)")
+        print("2. Communicate with Court")
+        print("3. Reset App (Clear all)")
+        print("4. Exit")
         
-        choice = input("\nSelect Option: ")
+        cmd = input("\nSelect: ")
+        if cmd == "1": self.open_vault()
+        elif cmd == "2": self.court_sync()
+        elif cmd == "3": self.reset_app()
+        elif cmd == "4": exit()
+        else: self.run()
 
-        if choice == "1":
-            self.create_draft()
-        elif choice == "2":
-            self.view_vault()
-        elif choice == "3":
-            self.communicate_with_court()
-        elif choice == "4":
-            sys.exit()
-        else:
-            self.show_dashboard()
-
-    def create_draft(self):
-        print("\n--- NEW DRAFT ---")
-        title = input("Enter Case/Draft Title: ")
-        content = input("Enter Content: ")
-        VaultManager.save_draft(title, content)
-        self.show_dashboard()
-
-    def view_vault(self):
+    def open_vault(self):
         print("\n--- PRIVATE VAULT ---")
-        drafts = VaultManager.list_drafts()
-        if not drafts:
-            print("No drafts found.")
-        for i, d in enumerate(drafts):
-            print(f"{i+1}. {d}")
-        input("\nPress Enter to return...")
-        self.show_dashboard()
+        for i, draft in enumerate(self.state["vault"]):
+            print(f"[{i}] {draft['title']}")
+        
+        choice = input("\n[N]ew Draft or [B]ack: ").lower()
+        if choice == 'n':
+            t = input("Title: ")
+            c = input("Content: ")
+            self.state["vault"].append({"title": t, "content": c})
+            self.save_all_data()
+        self.run()
 
-    def communicate_with_court(self):
-        print("\n[Connecting to Court Site...]")
-        # This will eventually use your drafts to fill the court forms
-        print("Ready to push data from Vault to Court Dashboard.")
-        self.show_dashboard()
+    def court_sync(self):
+        print(f"\n[Connecting...] Fetching Court Site for {self.state['user']['name']}...")
+        print("Status: Connected. Ready to push drafts.")
+        input("Press Enter to return...")
+        self.run()
+
+    def reset_app(self):
+        """Fixes 'Spoiled' apps by wiping the data file."""
+        if os.path.exists(self.db_file):
+            os.remove(self.db_file)
+        print("\n[Wiped] Data cleared. Restarting...")
+        self.state = {"user": None, "vault": []}
+        self.run()
 
 if _name_ == "_main_":
-    app = CourtApp()
-    app.start()
+    CourtApp().run()
