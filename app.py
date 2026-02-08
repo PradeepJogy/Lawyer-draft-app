@@ -1,60 +1,107 @@
-import streamlit as st
-import pandas as pd
+import json
+import os
+import sys
 
-st.set_page_config(page_title="Lawyer Vault", layout="centered")
+class VaultManager:
+    """Handles storage of drafts and private notes."""
+    VAULT_DIR = "private_vault"
 
-# Temporary user and case storage
-if 'users' not in st.session_state:
-    st.session_state['users'] = {"admin": "password123"}
-if 'cases' not in st.session_state:
-    st.session_state['cases'] = []
+    @classmethod
+    def ensure_vault_exists(cls):
+        if not os.path.exists(cls.VAULT_DIR):
+            os.makedirs(cls.VAULT_DIR)
 
-st.title("⚖️ Legal Case Manager")
+    @classmethod
+    def save_draft(cls, title, content):
+        cls.ensure_vault_exists()
+        filename = f"{cls.VAULT_DIR}/{title.replace(' ', '_')}.txt"
+        with open(filename, 'w') as f:
+            f.write(content)
+        print(f"\n[Vault] Draft '{title}' saved successfully.")
 
-menu = ["Access Portal", "Case Dashboard", "Drafting Vault"]
-choice = st.sidebar.selectbox("Menu", menu)
+    @classmethod
+    def list_drafts(cls):
+        if not os.path.exists(cls.VAULT_DIR):
+            return []
+        return os.listdir(cls.VAULT_DIR)
 
-if choice == "Access Portal":
-    st.subheader("Lawyer Portal")
-    auth_mode = st.radio("Choose Action:", ["Login", "Register New Account"])
-    if auth_mode == "Register New Account":
-        new_user = st.text_input("Create Username (Bar ID)")
-        new_pw = st.text_input("Create Password", type="password")
-        if st.button("Sign Up"):
-            st.session_state['users'][new_user] = new_pw
-            st.success("Account created! Switch to Login.")
-    elif auth_mode == "Login":
-        user = st.text_input("Username (Bar ID)")
-        password = st.text_input("Password", type="password")
-        if st.button("Login"):
-            if user in st.session_state['users'] and st.session_state['users'][user] == password:
-                st.success(f"Welcome, Advocate {user}")
-                st.session_state['logged_in'] = True
+class CourtApp:
+    def _init_(self):
+        self.session_file = "user_session.json"
+        self.user_data = self.load_session()
+        self.is_authenticated = bool(self.user_data)
 
-elif choice == "Case Dashboard":
-    st.subheader("📁 New Case Entry Form")
-    with st.form("case_form"):
-        st.markdown("### 👥 Litigant Information")
-        lit_name = st.text_input("Primary Litigant Name")
-        others = st.text_area("Additional Litigants")
-        p_type = st.selectbox("Party Type", ["Petitioner", "Appellant", "Respondent", "Defendant"])
+    def load_session(self):
+        if os.path.exists(self.session_file):
+            with open(self.session_file, 'r') as f:
+                return json.load(f)
+        return None
 
-        st.markdown("### 🏛️ Court & Filing")
-        court = st.text_input("Name of Court")
-        f_type = st.selectbox("Filing Type", ["Diary Number", "Stamp Number", "Filing Number"])
-        f_val = st.text_input("Enter Number")
-        f_year = st.number_input("Year", min_value=1950, max_value=2030, value=2026)
+    def save_session(self, u, p):
+        data = {"username": u, "password": p}
+        with open(self.session_file, 'w') as f:
+            json.dump(data, f)
+        self.user_data = data
+        self.is_authenticated = True
 
-        if st.form_submit_button("Save Case"):
-            case_data = {"Name": lit_name, "Court": court, "Number": f"{f_val}/{f_year}"}
-            st.session_state['cases'].append(case_data)
-            st.success(f"Case for {lit_name} saved!")
+    def start(self):
+        print("=== Secure Court System v1.0 ===")
+        if self.is_authenticated:
+            self.show_dashboard()
+        else:
+            self.show_auth_screen()
 
-    if st.session_state['cases']:
-        st.write("### 📋 Your Saved Cases (This Session)")
-        st.table(pd.DataFrame(st.session_state['cases']))
+    def show_auth_screen(self):
+        print("\n--- LOGIN / REGISTRATION ---")
+        u = input("Username: ")
+        p = input("Password: ")
+        if u and p:
+            self.save_session(u, p)
+            self.show_dashboard()
 
-elif choice == "Drafting Vault":
-    st.subheader("🔒 Secure Drafting")
-    st.text_area("Start typing your legal draft...", height=300)
-    st.button("Encrypt & Save")
+    def show_dashboard(self):
+        print(f"\n--- DASHBOARD (User: {self.user_data['username']}) ---")
+        print("1. [Vault] Create New Draft")
+        print("2. [Vault] View Saved Drafts")
+        print("3. Communicate with Court Site")
+        print("4. Logout & Exit")
+        
+        choice = input("\nSelect Option: ")
+
+        if choice == "1":
+            self.create_draft()
+        elif choice == "2":
+            self.view_vault()
+        elif choice == "3":
+            self.communicate_with_court()
+        elif choice == "4":
+            sys.exit()
+        else:
+            self.show_dashboard()
+
+    def create_draft(self):
+        print("\n--- NEW DRAFT ---")
+        title = input("Enter Case/Draft Title: ")
+        content = input("Enter Content: ")
+        VaultManager.save_draft(title, content)
+        self.show_dashboard()
+
+    def view_vault(self):
+        print("\n--- PRIVATE VAULT ---")
+        drafts = VaultManager.list_drafts()
+        if not drafts:
+            print("No drafts found.")
+        for i, d in enumerate(drafts):
+            print(f"{i+1}. {d}")
+        input("\nPress Enter to return...")
+        self.show_dashboard()
+
+    def communicate_with_court(self):
+        print("\n[Connecting to Court Site...]")
+        # This will eventually use your drafts to fill the court forms
+        print("Ready to push data from Vault to Court Dashboard.")
+        self.show_dashboard()
+
+if _name_ == "_main_":
+    app = CourtApp()
+    app.start()
