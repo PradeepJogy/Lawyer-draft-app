@@ -1,137 +1,115 @@
-import streamlit as st
-import json
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from playwright.sync_api import sync_playwright
 import os
 
-# --- 1. CONFIGURATION & PERSISTENCE ---
-DB_FILE = "sc_lawyer_vault.json"
-SCI_BASE_URL = "https://main.sci.gov.in"
+app = Flask(_name_)
+app.config['SECRET_KEY'] = 'legal_tech_2026_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///court_firm.db'
 
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return {"users": {}}
-    return {"users": {}}
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 
-def save_db(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+# --- DATABASE MODELS ---
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    cases = db.relationship('Case', backref='owner', lazy=True)
 
-# Initialize Session State
-if "db" not in st.session_state:
-    st.session_state.db = load_db()
-if "current_user" not in st.session_state:
-    st.session_state.current_user = None
+class Case(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    diary_no = db.Column(db.String(20), nullable=False)
+    year = db.Column(db.String(4), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-# --- 2. RECTIFIED AUTHENTICATION GATE ---
-def auth_gate():
-    st.title("🏛️ Supreme Court Counsel Portal")
-    st.subheader("Secure Access Gateway")
-    
-    tab_login, tab_signup = st.tabs(["🔐 Log In", "📝 Sign Up"])
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-    with tab_login:
-        u_login = st.text_input("Username", key="l_user")
-        p_login = st.text_input("Password", type="password", key="l_pass")
-        if st.button("Access Vault"):
-            user_data = st.session_state.db["users"].get(u_login)
-            if user_data and user_data["password"] == p_login:
-                st.session_state.current_user = u_login
-                st.rerun()
-            else:
-                st.error("Invalid credentials.")
-
-    with tab_signup:
-        with st.form("reg_form"):
-            new_u = st.text_input("Create Username")
-            new_p = st.text_input("Create Password", type="password")
-            conf_p = st.text_input("Confirm Password", type="password")
-            if st.form_submit_button("Register Account"):
-                if new_u in st.session_state.db["users"]:
-                    st.error("Username already exists.")
-                elif new_u and new_p == conf_p:
-                    st.session_state.db["users"][new_u] = {"password": new_p, "cases": []}
-                    save_db(st.session_state.db)
-                    st.success("Account created! Please log in.")
-                else:
-                    st.error("Please verify your inputs.")
-
-# --- 3. RECTIFIED 2-PART DASHBOARD (SUPREME COURT ONLY) ---
-def case_management():
-    user_id = st.session_state.current_user
-    user_data = st.session_state.db["users"][user_id]
-    
-    st.sidebar.title("Counsel Sidebar")
-    st.sidebar.info(f"Logged in as: {user_id}")
-    if st.sidebar.button("Log Out"):
-        st.session_state.current_user = None
-        st.rerun()
-
-    st.title("💼 Case Management Dashboard")
-    st.divider()
-
-    # --- PART 1: INTAKE (CLIENT & DIARY) ---
-    st.header("Part 1: New Case Intake")
-    with st.expander("➕ Register New Filing from Desk", expanded=True):
-        with st.form("sc_intake", clear_on_submit=True):
-            client = st.text_input("Client Name")
+# --- REAL-TIME COURT COMMUNICATION LOGIC ---
+def fetch_defects_from_court(diary_no, year):
+    """Automated interaction with the Court Registry site."""
+    try:
+        with sync_playwright() as p:
+            # Launching browser (headless=True means no window pops up)
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
             
-            c1, c2 = st.columns(2)
-            with c1:
-                diary_no = st.text_input("Diary Number")
-            with c2:
-                diary_year = st.selectbox("Filing Year", range(2026, 2015, -1))
+            # 1. Navigate to the Court Status site
+            page.goto("https://www.sci.gov.in/case-status-diary-no/")
             
-            case_type = st.text_input("Case Category (e.g. SLP Civil)")
+            # 2. Fill the form entered by the user
+            page.fill("#ans_dept", diary_no)
+            page.select_option("#ans_year", label=year)
             
-            if st.form_submit_button("Save to Private Vault"):
-                if client and diary_no:
-                    new_case = {
-                        "client": client,
-                        "diary_no": diary_no,
-                        "year": diary_year,
-                        "type": case_type,
-                        "status": "Awaiting Sync"
-                    }
-                    st.session_state.db["users"][user_id]["cases"].append(new_case)
-                    save_db(st.session_state.db)
-                    st.success(f"Case saved: Diary No {diary_no}/{diary_year}")
-                    st.rerun()
+            # 3. Trigger search (Assumes a simple submit button)
+            page.click("#get_status_btn") 
+            page.wait_for_timeout(2000) # Wait for results to load
+            
+            # 4. Extract Scrutiny/Defect info
+            # Replace '.defect-info' with the actual class/ID from the court site
+            content = page.inner_text("body") 
+            
+            browser.close()
+            return {"status": "Success", "data": content}
+    except Exception as e:
+        return {"status": "Error", "message": str(e)}
 
-    st.divider()
+# --- ROUTES ---
 
-    # --- PART 2: VAULT & COMMUNICATION ---
-    st.header("Part 2: Private Vault & Court Sync")
+@app.route('/')
+def index():
+    return redirect(url_for('login'))
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        hashed_pw = generate_password_hash(request.form['password'])
+        new_user = User(email=request.form['email'], password=hashed_pw)
+        db.session.add(new_user)
+        db.session.commit()
+        flash('Account created! Please login.')
+        return redirect(url_for('login'))
+    return '''<form method="post">Email: <input name="email"><br>Pass: <input type="password" name="password"><br><button>Register</button></form>'''
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user = User.query.filter_by(email=request.form['email']).first()
+        if user and check_password_hash(user.password, request.form['password']):
+            login_user(user)
+            return redirect(url_for('dashboard'))
+        flash('Login Failed')
+    return '''<form method="post">Email: <input name="email"><br>Pass: <input type="password" name="password"><br><button>Login</button></form>'''
+
+@app.route('/dashboard', methods=['GET', 'POST'])
+@login_required
+def dashboard():
+    if request.method == 'POST':
+        # User fills the dashboard form
+        new_case = Case(diary_no=request.form['diary'], year=request.form['year'], owner=current_user)
+        db.session.add(new_case)
+        db.session.commit()
+        
+    user_cases = Case.query.filter_by(user_id=current_user.id).all()
+    return render_template('dashboard.html', cases=user_cases)
+
+@app.route('/api/sync/<int:case_id>')
+@login_required
+def sync_case(case_id):
+    case = Case.query.get_or_404(case_id)
+    if case.user_id != current_user.id:
+        return jsonify({"error": "Unauthorized"}), 403
     
-    if not user_data["cases"]:
-        st.info("Your vault is currently empty.")
-    else:
-        for i, case in enumerate(user_data["cases"]):
-            with st.container(border=True):
-                col_info, col_action = st.columns([3, 1])
-                
-                with col_info:
-                    st.write(f"### {case['client']}")
-                    st.write(f"*Diary No:* {case['diary_no']}/{case['year']} | *Type:* {case['type']}")
-                
-                with col_action:
-                    # Logic: "App should search that court only but should not ask URL"
-                    if st.button(f"🔍 Sync SCI", key=f"sync_{i}"):
-                        with st.status("Communicating with Supreme Court...", expanded=False):
-                            st.write(f"Targeting: {SCI_BASE_URL}")
-                            st.write(f"Searching Diary Number: {case['diary_no']}...")
-                            # Backend link to SCI search would happen here
-                        st.success("Sync Complete")
-                    
-                    if st.button("🗑️ Remove", key=f"del_{i}"):
-                        user_data["cases"].pop(i)
-                        save_db(st.session_state.db)
-                        st.rerun()
+    # Trigger the Court Site communication
+    result = fetch_defects_from_court(case.diary_no, case.year)
+    return jsonify(result)
 
-# --- 4. MAIN EXECUTION ---
-if st.session_state.current_user is None:
-    auth_gate()
-else:
-    case_management()
+if _name_ == '_main_':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
