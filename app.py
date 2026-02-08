@@ -29,10 +29,38 @@ if "db" not in st.session_state:
 if "current_user" not in st.session_state:
     st.session_state.current_user = None
 
-# --- 2. AUTHENTICATION GATE (Keep your existing login/signup code here) ---
+# --- 2. AUTHENTICATION LOGIC (Clean Registration/Login) ---
 def auth_gate():
-    # ... (Your existing tab_login and tab_signup code) ...
-    pass
+    st.title("⚖️ Secure Legal Portal")
+    
+    # Check if we need to show Registration or Login
+    users_exist = len(st.session_state.db["users"]) > 0
+
+    if not users_exist:
+        st.subheader("New User Registration")
+        with st.form("reg_form"):
+            u = st.text_input("Create Username")
+            p = st.text_input("Create Password", type="password")
+            # Note: Court URL removed from here
+            if st.form_submit_button("Register Account"):
+                if u and p:
+                    st.session_state.db["users"][u] = {"password": p, "court": "", "cases": []}
+                    save_db(st.session_state.db)
+                    st.success("Account created! Please log in.")
+                    st.rerun()
+                else:
+                    st.error("Please provide both a username and password.")
+    else:
+        st.subheader("Login")
+        u_login = st.text_input("Username")
+        p_login = st.text_input("Password", type="password")
+        if st.button("Sign In"):
+            user_data = st.session_state.db["users"].get(u_login)
+            if user_data and user_data["password"] == p_login:
+                st.session_state.current_user = u_login
+                st.rerun()
+            else:
+                st.error("Invalid credentials.")
 
 # --- 3. THE LAWYER'S TWO-PART DASHBOARD ---
 def case_management():
