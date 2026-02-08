@@ -3,33 +3,41 @@ import pandas as pd
 
 st.set_page_config(page_title="Lawyer Vault", layout="centered")
 
+# --- USER SESSION STATE ---
+# This acts as a temporary database for your testing session
+if 'users' not in st.session_state:
+    st.session_state['users'] = {"admin": "password123"} # Default user
+
 st.title("⚖️ Legal Case Manager")
 
-# Simple Sidebar for Navigation
-menu = ["Login", "Case Dashboard", "Drafting Vault"]
+# Sidebar for Navigation
+menu = ["Access Portal", "Case Dashboard", "Drafting Vault"]
 choice = st.sidebar.selectbox("Menu", menu)
 
-if choice == "Login":
-    st.subheader("Lawyer Login")
-    user = st.text_input("Bar Council ID")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        st.success(f"Welcome, Advocate {user}")
+if choice == "Access Portal":
+    st.subheader("Lawyer Portal")
+    
+    # Toggle between Login and Registration
+    auth_mode = st.radio("Choose Action:", ["Login", "Register New Account"])
 
-elif choice == "Case Dashboard":
-    st.subheader("Current Case List (CIS)")
-    # Sample data
-    data = {
-        "Case Number": ["OS/123/2024", "CP/99/2023", "WP/456/2024"],
-        "Court": ["High Court", "District Court", "Supreme Court"],
-        "Status": ["Hearing", "Pending", "Decided"]
-    }
-    df = pd.DataFrame(data)
-    st.table(df)
+    if auth_mode == "Register New Account":
+        new_user = st.text_input("Create Username (Bar ID)")
+        new_pw = st.text_input("Create Password", type="password")
+        if st.button("Sign Up"):
+            if new_user in st.session_state['users']:
+                st.error("User already exists!")
+            else:
+                st.session_state['users'][new_user] = new_pw
+                st.success("Account created! You can now switch to Login.")
 
-elif choice == "Drafting Vault":
-    st.subheader("Secure Drafting Area")
-    st.info("Everything typed here is protected by 256-bit encryption.")
-    draft = st.text_area("Write your draft here...", height=300)
-    if st.button("Encrypt & Save"):
-        st.success("Draft securely saved to your private vault!")
+    elif auth_mode == "Login":
+        user = st.text_input("Username (Bar ID)")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if user in st.session_state['users'] and st.session_state['users'][user] == password:
+                st.success(f"Welcome, Advocate {user}")
+                st.session_state['logged_in_user'] = user
+            else:
+                st.error("Invalid Username or Password")
+
+# ... rest of your Dashboard and Vault code
