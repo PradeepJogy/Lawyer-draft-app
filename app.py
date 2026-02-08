@@ -57,4 +57,4 @@ tk.Button(main_frame, text="Generate Draft", command=generate_draft).pack(pady=5
 draft_output = tk.Text(main_frame, height=10, bg="#f0f0f0")
 draft_output.pack(fill="both", expand=True)
 
-root.mainloop(
+root.mainloop()
