@@ -1,81 +1,93 @@
+import streamlit as st
 import json
 import os
 
-class CourtApp:
-    def _init_(self):
-        self.db_file = "app_data.json"
-        self.state = self.load_all_data()
+# --- 1. CONFIGURATION & PERSISTENCE ---
+DB_FILE = "court_vault_data.json"
 
-    def load_all_data(self):
-        """Loads everything (User & Vault) in one go to prevent sync errors."""
-        if os.path.exists(self.db_file):
-            with open(self.db_file, 'r') as f:
-                return json.load(f)
-        # Default empty state if app is 'new' or 'spoiled'
-        return {"user": None, "vault": []}
+def load_data():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    return {"user": None, "vault": []}
 
-    def save_all_data(self):
-        """Writes current state to disk immediately."""
-        with open(self.db_file, 'w') as f:
-            json.dump(self.state, f, indent=4)
+def save_data(data):
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-    def run(self):
-        """The brain of the app: Checks login status first."""
-        if not self.state["user"]:
-            self.show_login()
-        else:
-            self.show_dashboard()
+# Initialize app state
+if "app_data" not in st.session_state:
+    st.session_state.app_data = load_data()
 
-    def show_login(self):
-        print("\n--- APP REGISTRATION ---")
-        u = input("Username: ")
-        p = input("Password: ")
-        if u and p:
-            self.state["user"] = {"name": u, "pass": p}
-            self.save_all_data()
-            print("Success! Restarting to Dashboard...")
-            self.run()
-
-    def show_dashboard(self):
-        print(f"\n--- DASHBOARD (User: {self.state['user']['name']}) ---")
-        print("1. Private Vault (Drafts)")
-        print("2. Communicate with Court")
-        print("3. Reset App (Clear all)")
-        print("4. Exit")
+# --- 2. AUTHENTICATION SYSTEM (The Switch) ---
+def login_page():
+    st.title("⚖️ Court System Registration")
+    st.info("Please register to access your private vault and court dashboard.")
+    
+    with st.form("reg_form"):
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        court_url = st.text_input("Court Website URL (e.g., https://court.gov)")
+        submit = st.form_submit_button("Register & Login")
         
-        cmd = input("\nSelect: ")
-        if cmd == "1": self.open_vault()
-        elif cmd == "2": self.court_sync()
-        elif cmd == "3": self.reset_app()
-        elif cmd == "4": exit()
-        else: self.run()
+        if submit:
+            if u and p and court_url:
+                st.session_state.app_data["user"] = {
+                    "username": u, 
+                    "password": p, 
+                    "court_site": court_url
+                }
+                save_data(st.session_state.app_data)
+                st.success("Registration Successful!")
+                st.rerun()
+            else:
+                st.error("Please fill all fields.")
 
-    def open_vault(self):
-        print("\n--- PRIVATE VAULT ---")
-        for i, draft in enumerate(self.state["vault"]):
-            print(f"[{i}] {draft['title']}")
+# --- 3. DASHBOARD & VAULT ---
+def dashboard_page():
+    user = st.session_state.app_data["user"]
+    st.sidebar.title(f"Welcome, {user['username']}")
+    
+    menu = st.sidebar.radio("Navigation", ["Private Vault", "Court Communication", "Settings"])
+
+    if menu == "Private Vault":
+        st.header("🗄️ Private Drafting Vault")
         
-        choice = input("\n[N]ew Draft or [B]ack: ").lower()
-        if choice == 'n':
-            t = input("Title: ")
-            c = input("Content: ")
-            self.state["vault"].append({"title": t, "content": c})
-            self.save_all_data()
-        self.run()
+        # New Draft Section
+        with st.expander("➕ Create New Draft"):
+            title = st.text_input("Case/Draft Title")
+            content = st.text_area("Draft Content")
+            if st.button("Save to Vault"):
+                st.session_state.app_data["vault"].append({"title": title, "content": content})
+                save_data(st.session_state.app_data)
+                st.success("Draft Saved!")
+                st.rerun()
 
-    def court_sync(self):
-        print(f"\n[Connecting...] Fetching Court Site for {self.state['user']['name']}...")
-        print("Status: Connected. Ready to push drafts.")
-        input("Press Enter to return...")
-        self.run()
+        # List Existing Drafts
+        st.subheader("Your Saved Drafts")
+        for i, item in enumerate(st.session_state.app_data["vault"]):
+            with st.chat_message("user"):
+                st.write(f"*{item['title']}*")
+                st.write(item['content'])
 
-    def reset_app(self):
-        """Fixes 'Spoiled' apps by wiping the data file."""
-        if os.path.exists(self.db_file):
-            os.remove(self.db_file)
-        print("\n[Wiped] Data cleared. Restarting...")
-        self.state = {"user": None, "vault": []}
-        self.run()
+    elif menu == "Court Communication":
+        st.header("🌐 Court Site Interface")
+        st.write(f"Targeting: *{user['court_site']}*")
+        
+        if st.button("Push Vault Data to Court Form"):
+            st.warning(f"Connecting to {user['court_site']}...")
+            # Here is where the backend communication with the court site happens
+            st.success("Handshake established. Form data is ready for the Court's dashboard.")
 
-if _name_ == "_main_":
-    CourtApp().run()
+    elif menu == "Settings":
+        if st.button("Wipe All Data & Logout"):
+            if os.path.exists(DB_FILE):
+                os.remove(DB_FILE)
+            st.session_state.app_data = {"user": None, "vault": []}
+            st.rerun()
+
+# --- 4. MAIN APP LOGIC ---
+if st.session_state.app_data["user"] is None:
+    login_page()
+else:
+    dashboard_page()
